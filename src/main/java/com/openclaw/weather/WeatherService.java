@@ -184,28 +184,39 @@ public class WeatherService {
     }
 
     private String buildOnsetAlertEmail(WeatherLocation location, String jsonData) throws IOException {
-        // Simple onset detection (kept simple as requested)
         JsonNode root = objectMapper.readTree(jsonData);
         JsonNode minutely = root.path("minutely_15");
 
         boolean rainAlert = false;
         boolean windAlert = false;
+        boolean snowAlert = false;
+        boolean freezingAlert = false;
+        boolean stormAlert = false;
 
         for (int i = 0; i < Math.min(3, minutely.path("time").size()); i++) {
             double precip = minutely.path("precipitation").get(i).asDouble();
+            double rain = minutely.path("rain").get(i).asDouble();
+            double snow = minutely.path("snowfall").get(i).asDouble();
             double wind = minutely.path("wind_speed_10m").get(i).asDouble();
             double gust = minutely.path("wind_gusts_10m").get(i).asDouble();
+            int code = minutely.path("weather_code").get(i).asInt();
 
-            if (precip > 0.1) rainAlert = true;
+            if (precip > 0.1 || rain > 0.1) rainAlert = true;
+            if (snow > 0.1) snowAlert = true;
             if (wind > 40 || gust > 60) windAlert = true;
+            if (code == 56 || code == 57 || code == 66 || code == 67) freezingAlert = true;
+            if (code == 95 || code == 96 || code == 99) stormAlert = true;
         }
 
-        if (!rainAlert && !windAlert) return "";
+        if (!rainAlert && !windAlert && !snowAlert && !freezingAlert && !stormAlert) return "";
 
         StringBuilder sb = new StringBuilder();
         sb.append("<h3>Weather Alert - ").append(location.getName()).append("</h3>");
         if (rainAlert) sb.append("<p><b>[RAIN WARNING]</b> Rain expected in next 30 min</p>");
         if (windAlert) sb.append("<p><b>[STRONG WIND WARNING]</b> Strong wind expected in next 30 min</p>");
+        if (snowAlert) sb.append("<p><b>[SNOW WARNING]</b> Snow expected in next 30 min</p>");
+        if (freezingAlert) sb.append("<p><b>[FREEZING RAIN WARNING]</b> Freezing rain expected in next 30 min</p>");
+        if (stormAlert) sb.append("<p><b>[STORM WARNING]</b> Thunderstorm expected in next 30 min</p>");
         return sb.toString();
     }
 

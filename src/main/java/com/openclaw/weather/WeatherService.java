@@ -235,12 +235,45 @@ public class WeatherService {
     public void sendNightlyWarning(WeatherLocation location) {
         try {
             String json = fetchOpenMeteo15Min(location);
-            // Simple nightly check (kept simple)
-            String body = "<h3>Nightly Warning - " + location.getName() + "</h3><p>Overnight weather check completed.</p>";
-            sendAlertEmail(location, body);
+            String body = buildNightlyWarningBody(location, json);
+            if (!body.isEmpty()) {
+                sendAlertEmail(location, body);
+            }
         } catch (Exception e) {
             System.err.println("Nightly warning failed for " + location.getName());
         }
+    }
+
+    private String buildNightlyWarningBody(WeatherLocation location, String json) throws IOException {
+        JsonNode root = objectMapper.readTree(json);
+        JsonNode minutely = root.path("minutely_15");
+
+        boolean rain = false, wind = false, snow = false, freezing = false, storm = false;
+
+        for (int i = 0; i < minutely.path("time").size(); i++) {
+            double precip = minutely.path("precipitation").get(i).asDouble();
+            double windSpeed = minutely.path("wind_speed_10m").get(i).asDouble();
+            double gust = minutely.path("wind_gusts_10m").get(i).asDouble();
+            double snowVal = minutely.path("snowfall").get(i).asDouble();
+            int code = minutely.path("weather_code").get(i).asInt();
+
+            if (precip > 0.1) rain = true;
+            if (windSpeed > 40 || gust > 60) wind = true;
+            if (snowVal > 0.1) snow = true;
+            if (code == 56 || code == 57 || code == 66 || code == 67) freezing = true;
+            if (code == 95 || code == 96 || code == 99) storm = true;
+        }
+
+        if (!rain && !wind && !snow && !freezing && !storm) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<h3>[NIGHT WARNING] ").append(location.getName()).append(" overnight</h3>");
+        if (rain) sb.append("<p><b>[RAIN WARNING]</b> Rain expected overnight</p>");
+        if (wind) sb.append("<p><b>[STRONG WIND WARNING]</b> Strong wind expected overnight</p>");
+        if (snow) sb.append("<p><b>[SNOW WARNING]</b> Snow expected overnight</p>");
+        if (freezing) sb.append("<p><b>[FREEZING RAIN WARNING]</b> Freezing rain expected overnight</p>");
+        if (storm) sb.append("<p><b>[STORM WARNING]</b> Thunderstorm expected overnight</p>");
+        return sb.toString();
     }
 
     private String buildHourlyTable(String hourlyJson) throws IOException {

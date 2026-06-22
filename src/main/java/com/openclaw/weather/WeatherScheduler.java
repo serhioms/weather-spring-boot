@@ -29,4 +29,17 @@ public class WeatherScheduler {
             }
         }
     }
+
+    // 30-minute onset alerts (runs at :00 and :30 from 6:00 to 22:30 UTC)
+    @Scheduled(cron = "0,30 6-22 * * *", zone = "UTC")
+    public void checkOnsetAlerts() {
+        List<WeatherLocation> locations = weatherProperties.getLocations();
+        for (WeatherLocation location : locations) {
+            try {
+                weatherService.checkAndSendOnsetAlerts(location);
+            } catch (Exception e) {
+                System.err.println("Alert check failed for " + location.getName() + ": " + e.getMessage());
+            }
+        }
+    }
 }

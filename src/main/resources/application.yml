@@ -19,7 +19,6 @@ weather:
       timezone: "America/Toronto"
       recipients:
         - "sergey.moskovskiy@gmail.com"
-        - "natalia.moskovski@gmail.com"
     - name: "Montréal H2R 2N4"
       lat: 45.5419
       lon: -73.6155

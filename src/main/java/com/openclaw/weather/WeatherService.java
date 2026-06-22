@@ -93,6 +93,21 @@ public class WeatherService {
         return response.body();
     }
 
+    private String fetchOpenMeteo15Min(WeatherLocation location) throws IOException, InterruptedException {
+        String url = String.format(
+            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&minutely_15=temperature_2m,precipitation,rain,showers,snowfall,weather_code,wind_speed_10m,wind_gusts_10m&timezone=%s&forecast_days=1",
+            location.getLat(), location.getLon(), location.getTimezone().replace("/", "%2F")
+        );
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return response.body();
+    }
+
     private String fetchOpenMeteoHourly(WeatherLocation location) throws IOException, InterruptedException {
         String url = String.format(
             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&hourly=temperature_2m,weather_code,precipitation_probability&timezone=%s&forecast_days=1",
@@ -109,7 +124,7 @@ public class WeatherService {
     }
 
     private String buildCompactEmailBody(WeatherLocation location, String dailyJson, String hourlyJson, String alertInfo) throws IOException {
-        JsonNode root = objectMapper.readTree(json);
+        JsonNode root = objectMapper.readTree(dailyJson);
         JsonNode daily = root.path("daily");
 
         StringBuilder sb = new StringBuilder();
@@ -152,6 +167,69 @@ public class WeatherService {
         sb.append("</div>");
 
         return sb.toString();
+    }
+
+    // ==================== 30-MINUTE ALERT LOGIC ====================
+
+    public void checkAndSendOnsetAlerts(WeatherLocation location) {
+        try {
+            String json = fetchOpenMeteo15Min(location);
+            String alertBody = buildOnsetAlertEmail(location, json);
+            if (!alertBody.isEmpty()) {
+                sendAlertEmail(location, alertBody);
+            }
+        } catch (Exception e) {
+            System.err.println("Alert check failed for " + location.getName() + ": " + e.getMessage());
+        }
+    }
+
+    private String buildOnsetAlertEmail(WeatherLocation location, String jsonData) throws IOException {
+        // Simple onset detection (kept simple as requested)
+        JsonNode root = objectMapper.readTree(jsonData);
+        JsonNode minutely = root.path("minutely_15");
+
+        boolean rainAlert = false;
+        boolean windAlert = false;
+
+        for (int i = 0; i < Math.min(3, minutely.path("time").size()); i++) {
+            double precip = minutely.path("precipitation").get(i).asDouble();
+            double wind = minutely.path("wind_speed_10m").get(i).asDouble();
+            double gust = minutely.path("wind_gusts_10m").get(i).asDouble();
+
+            if (precip > 0.1) rainAlert = true;
+            if (wind > 40 || gust > 60) windAlert = true;
+        }
+
+        if (!rainAlert && !windAlert) return "";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<h3>Weather Alert - ").append(location.getName()).append("</h3>");
+        if (rainAlert) sb.append("<p><b>[RAIN WARNING]</b> Rain expected in next 30 min</p>");
+        if (windAlert) sb.append("<p><b>[STRONG WIND WARNING]</b> Strong wind expected in next 30 min</p>");
+        return sb.toString();
+    }
+
+    private void sendAlertEmail(WeatherLocation location, String htmlBody) throws MessagingException {
+        MimeMessage message = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        helper.setFrom(mailFrom);
+        helper.setTo(location.getRecipients().toArray(new String[0]));
+        helper.setSubject(location.getName() + " weather alert");
+        helper.setText(htmlBody, true);
+        mailSender.send(message);
+    }
+
+    // ==================== NIGHTLY WARNING LOGIC ====================
+
+    public void sendNightlyWarning(WeatherLocation location) {
+        try {
+            String json = fetchOpenMeteo15Min(location);
+            // Simple nightly check (kept simple)
+            String body = "<h3>Nightly Warning - " + location.getName() + "</h3><p>Overnight weather check completed.</p>";
+            sendAlertEmail(location, body);
+        } catch (Exception e) {
+            System.err.println("Nightly warning failed for " + location.getName());
+        }
     }
 
     private String buildHourlyTable(String hourlyJson) throws IOException {

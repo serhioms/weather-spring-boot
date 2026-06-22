@@ -5,4 +5,4 @@ export MAIL_USERNAME=sergey.moskovskiy@gmail.com
 export MAIL_PASSWORD=your-gmail-app-password-here
 
 echo "Starting Weather Forecast Spring Boot application..."
-./mvnw spring-boot:run
+mvn spring-boot:run

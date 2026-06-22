@@ -34,9 +34,10 @@ public class WeatherService {
 
     public void sendDailyForecast(WeatherLocation location) {
         try {
-            String forecastJson = fetchOpenMeteo(location);
+            String dailyJson = fetchOpenMeteoDaily(location);
+            String hourlyJson = fetchOpenMeteoHourly(location);
             String alertInfo = fetchEnvironmentCanadaAlerts(location);
-            String emailBody = buildCompactEmailBody(location, forecastJson, alertInfo);
+            String emailBody = buildCompactEmailBody(location, dailyJson, hourlyJson, alertInfo);
             sendEmail(location, emailBody);
         } catch (Exception e) {
             throw new RuntimeException("Failed to send forecast for " + location.getName(), e);
@@ -44,12 +45,40 @@ public class WeatherService {
     }
 
     private String fetchEnvironmentCanadaAlerts(WeatherLocation location) {
-        // Basic placeholder - in production you would scrape or call EC API
-        // For now we return empty (no active alerts)
-        return "";
+        try {
+            String url = String.format(
+                "https://weather.gc.ca/en/location/index.html?coords=%.4f%%2C%.4f",
+                location.getLat(), location.getLon()
+            );
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("User-Agent", "Mozilla/5.0")
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String html = response.body();
+
+            // Simple parsing for warnings
+            if (html.contains("warning") || html.contains("alert") || html.contains("vigilance")) {
+                // Extract warning text if present
+                if (html.contains("Special Weather Statement") || html.contains("Weather Advisory")) {
+                    return "Special Weather Statement active";
+                }
+                if (html.contains("Rainfall Warning") || html.contains("Thunderstorm Warning")) {
+                    return "Rain/Thunderstorm warning active";
+                }
+                return "Weather alert active";
+            }
+
+            return "";
+        } catch (Exception e) {
+            return "";
+        }
     }
 
-    private String fetchOpenMeteo(WeatherLocation location) throws IOException, InterruptedException {
+    private String fetchOpenMeteoDaily(WeatherLocation location) throws IOException, InterruptedException {
         String url = String.format(
             "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=%s&forecast_days=8",
             location.getLat(), location.getLon(), location.getTimezone().replace("/", "%2F")
@@ -64,7 +93,22 @@ public class WeatherService {
         return response.body();
     }
 
-    private String buildCompactEmailBody(WeatherLocation location, String json, String alertInfo) throws IOException {
+    private String fetchOpenMeteoHourly(WeatherLocation location) throws IOException, InterruptedException {
+        String url = String.format(
+            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&hourly=temperature_2m,weather_code,precipitation_probability&timezone=%s&forecast_days=1",
+            location.getLat(), location.getLon(), location.getTimezone().replace("/", "%2F")
+        );
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return response.body();
+    }
+
+    private String buildCompactEmailBody(WeatherLocation location, String dailyJson, String hourlyJson, String alertInfo) throws IOException {
         JsonNode root = objectMapper.readTree(json);
         JsonNode daily = root.path("daily");
 
@@ -72,6 +116,9 @@ public class WeatherService {
         sb.append("<div style='font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif; max-width: 360px; margin: 0 auto;'>");
         sb.append("<h2 style='margin:0 0 8px 0;'>").append(location.getName()).append(" weather forecast</h2>");
         sb.append("<p style='margin:0 0 16px 0; color:#666; font-size:13px;'>").append(LocalDate.now()).append("–").append(LocalDate.now().plusDays(7)).append("</p>");
+
+        // Hourly table
+        sb.append(buildHourlyTable(hourlyJson));
 
         sb.append("<table style='width:100%; border-collapse: collapse; font-size:13px;'>");
         sb.append("<tr style='background:#f8f9fa;'>")
@@ -104,6 +151,49 @@ public class WeatherService {
         sb.append("<p style='margin-top:16px; font-size:11px; color:#888;'>Open-Meteo • ").append(alertSection).append("</p>");
         sb.append("</div>");
 
+        return sb.toString();
+    }
+
+    private String buildHourlyTable(String hourlyJson) throws IOException {
+        JsonNode root = objectMapper.readTree(hourlyJson);
+        JsonNode hourly = root.path("hourly");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<h3 style='margin:16px 0 8px 0; font-size:14px;'>Hourly Forecast</h3>");
+        sb.append("<table style='width:100%; border-collapse: collapse; font-size:12px; margin-bottom:16px;'>");
+        sb.append("<tr style='background:#f0f0f0;'>")
+          .append("<th style='padding:4px; text-align:left;'>Time</th>")
+          .append("<th style='padding:4px; text-align:center;'>Temp</th>")
+          .append("<th style='padding:4px; text-align:center;'>Weather</th>")
+          .append("<th style='padding:4px; text-align:center;'>Rain</th>")
+          .append("</tr>");
+
+        // Target hours: 7, 10, 12, 15, 17, 19, 22
+        int[] targetHours = {7, 10, 12, 15, 17, 19, 22};
+
+        for (int h : targetHours) {
+            for (int i = 0; i < hourly.path("time").size(); i++) {
+                String timeStr = hourly.path("time").get(i).asText();
+                if (timeStr.contains("T" + String.format("%02d", h) + ":")) {
+                    double temp = hourly.path("temperature_2m").get(i).asDouble();
+                    int code = hourly.path("weather_code").get(i).asInt();
+                    int rain = hourly.path("precipitation_probability").get(i).asInt();
+
+                    String weather = mapWeatherCode(code);
+                    String timeLabel = String.format("%02d:00", h);
+
+                    sb.append("<tr>")
+                      .append("<td style='padding:4px; border-top:1px solid #eee;'>").append(timeLabel).append("</td>")
+                      .append("<td style='padding:4px; border-top:1px solid #eee; text-align:center;'>").append(Math.round(temp)).append("°C</td>")
+                      .append("<td style='padding:4px; border-top:1px solid #eee; text-align:center;'>").append(weather).append("</td>")
+                      .append("<td style='padding:4px; border-top:1px solid #eee; text-align:center;'>").append(rain).append("%</td>")
+                      .append("</tr>");
+                    break;
+                }
+            }
+        }
+
+        sb.append("</table>");
         return sb.toString();
     }
 

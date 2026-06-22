@@ -2,7 +2,7 @@
 
 # Gmail credentials for sending weather forecast emails
 export MAIL_USERNAME=sergey.moskovskiy@gmail.com
-export MAIL_PASSWORD=vuuu pduf ejhz yrug
+export MAIL_PASSWORD=$1
 
 echo "Starting Weather Forecast Spring Boot application..."
-./mvnw spring-boot:run
+mvn spring-boot:run

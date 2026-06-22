@@ -1,0 +1,36 @@
+spring:
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+weather:
+  locations:
+    - name: "Belle Ewart"
+      lat: 44.271
+      lon: -79.542
+      timezone: "America/Toronto"
+      recipients:
+        - "sergey.moskovskiy@gmail.com"
+        - "natalia.moskovski@gmail.com"
+    - name: "Montréal H2R 2N4"
+      lat: 45.5419
+      lon: -73.6155
+      timezone: "America/Toronto"
+      recipients:
+        - "sergey.moskovskiy@gmail.com"
+        - "edward.moskovski@gmail.com"
+    - name: "Артёмово"
+      lat: 56.21
+      lon: 37.92
+      timezone: "Europe/Moscow"
+      recipients:
+        - "sergey.moskovskiy@gmail.com"
+        - "gleb1027@gmail.com"
